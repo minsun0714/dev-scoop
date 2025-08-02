@@ -27,14 +27,14 @@ public class RawPost {
     @Column(nullable = false, length = 2000)
     private String url;
 
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     private LocalDateTime collectedAt;
 
-    @Column(nullable = false, updatable = false)
+    @Column(nullable = false)
     private LocalDateTime createdAt;
 
     @PrePersist
     public void prePersist() {
-        this.createdAt = LocalDateTime.now();
+        this.collectedAt = LocalDateTime.now();
     }
 }
