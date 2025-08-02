@@ -7,3 +7,30 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  datasource:
+    url: jdbc:mysql://localhost:3306/devscoop?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: root
+    password: minsun
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: create
+    properties:
+      hibernate:
+        format_sql: true
+      hibernate.jdbc.batch_size: 100
+      hibernate.order_inserts: true
+    show-sql: true
+
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: true
+
+reddit:
+  client-id: amwqIRRDoPPlkH2y-y0rgA
+  secret: j0q1yAqaqj5eaavcA6hsCoN-Y0t1qw
+  username: YOUR_REDDIT_USERNAME
+  password: YOUR_REDDIT_PASSWORD
