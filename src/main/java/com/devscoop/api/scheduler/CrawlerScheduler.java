@@ -1,8 +1,9 @@
 package com.devscoop.api.scheduler;
 
-import com.devscoop.api.crawler.GitHubTrendingCrawler;
+import com.devscoop.api.crawler.DevtoCrawler;
 import com.devscoop.api.crawler.HackerNewsCrawler;
 import com.devscoop.api.crawler.RedditCrawler;
+import com.devscoop.api.dto.RawPostDto;
 import com.devscoop.api.producer.CrawledDataProducerService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -22,8 +23,8 @@ import java.util.concurrent.Executors;
 public class CrawlerScheduler {
 
     private final HackerNewsCrawler hackerNewsCrawler;
-    private final GitHubTrendingCrawler gitHubTrendingCrawler;
     private final RedditCrawler redditCrawler;
+    private final DevtoCrawler devtoCrawler;
     private final CrawledDataProducerService producer;
     private final RedisTemplate<String, String> redisTemplate;
     private final ObjectMapper mapper;
@@ -34,7 +35,7 @@ public class CrawlerScheduler {
     @Scheduled(fixedRate = 300_000)
     public void crawlAll() {
         CompletableFuture<Void> hackerNewsFuture = CompletableFuture.runAsync(this::crawlHackerNews, executor);
-        CompletableFuture<Void> githubFuture = CompletableFuture.runAsync(this::crawlGitHubTrending, executor);
+        CompletableFuture<Void> githubFuture = CompletableFuture.runAsync(this::crawlDevto, executor);
         CompletableFuture<Void> redditFuture = CompletableFuture.runAsync(this::crawlReddit, executor);
 
         CompletableFuture.allOf(hackerNewsFuture, githubFuture, redditFuture).join();
@@ -53,18 +54,20 @@ public class CrawlerScheduler {
     }
 
 
+
     private void crawlHackerNews() {
         try {
-            var stories = hackerNewsCrawler.fetchTopStories(10);
-            for (var story : stories) {
-                String id = String.valueOf(story.path("id").asLong());
-                if (!isNewContent("seen:hackernews", id)) continue;
+            var stories = hackerNewsCrawler.fetchTopStories(10); // List<RawPostDto>
+            for (RawPostDto story : stories) {
+                // 중복 여부를 url 기준으로 체크
+                String uniqueKey = story.getUrl().isBlank() ? story.getTitle() : story.getUrl();
+                if (!isNewContent("seen:hackernews", uniqueKey)) continue;
 
                 String json = mapper.createObjectNode()
-                        .put("source", "hackernews")
-                        .put("title", story.path("title").asText())
-                        .put("url", story.path("url").asText(""))
-                        .put("time", story.path("time").asLong())
+                        .put("source", story.getSource())
+                        .put("title", story.getTitle())
+                        .put("url", story.getUrl())
+                        .put("time", story.getPostedAt().toEpochSecond(java.time.ZoneOffset.UTC))
                         .toString();
                 producer.send(TOPIC, "hackernews", json);
             }
@@ -73,42 +76,43 @@ public class CrawlerScheduler {
         }
     }
 
-    private void crawlGitHubTrending() {
-        try {
-            var repos = gitHubTrendingCrawler.fetchTrendingRepos();
-            for (int i = 0; i < Math.min(5, repos.size()); i++) {
-                var repo = repos.get(i);
-                String url = "https://github.com" + repo.attr("href");
-                if (!isNewContent("seen:github", url)) continue;
-
-                String json = mapper.createObjectNode()
-                        .put("source", "github")
-                        .put("title", repo.text().trim())
-                        .put("url", url)
-                        .toString();
-                producer.send(TOPIC, "github", json);
-            }
-        } catch (Exception e) {
-            log.error("Error during crawlGitHubTrending", e);
-        }
-    }
-
     private void crawlReddit() {
         try {
-            var posts = redditCrawler.fetchTopPosts(5);
-            for (var post : posts) {
-                String postId = post.path("id").asText();
-                if (!isNewContent("seen:reddit", postId)) continue;
+            var posts = redditCrawler.fetchTopPosts(10); // List<RawPostDto>
+            for (RawPostDto post : posts) {
+                String uniqueKey = post.getUrl().isBlank() ? post.getTitle() : post.getUrl();
+                if (!isNewContent("seen:reddit", uniqueKey)) continue;
 
                 String json = mapper.createObjectNode()
-                        .put("source", "reddit")
-                        .put("title", post.path("title").asText())
-                        .put("url", post.path("url").asText())
+                        .put("source", post.getSource())
+                        .put("title", post.getTitle())
+                        .put("url", post.getUrl())
+                        .put("time", post.getPostedAt().toEpochSecond(java.time.ZoneOffset.UTC))
                         .toString();
                 producer.send(TOPIC, "reddit", json);
             }
         } catch (Exception e) {
             log.error("Error during crawlReddit", e);
+        }
+    }
+
+    private void crawlDevto() {
+        try {
+            var posts = devtoCrawler.fetchTopPosts(10); // List<RawPostDto>
+            for (RawPostDto post : posts) {
+                String uniqueKey = post.getUrl().isBlank() ? post.getTitle() : post.getUrl();
+                if (!isNewContent("seen:devto", uniqueKey)) continue;
+
+                String json = mapper.createObjectNode()
+                        .put("source", post.getSource())
+                        .put("title", post.getTitle())
+                        .put("url", post.getUrl())
+                        .put("time", post.getPostedAt().toEpochSecond(java.time.ZoneOffset.UTC))
+                        .toString();
+                producer.send(TOPIC, "devto", json);
+            }
+        } catch (Exception e) {
+            log.error("Error during devto", e);
         }
     }
 }
