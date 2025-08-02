@@ -15,7 +15,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: create
+      ddl-auto: none
     properties:
       hibernate:
         format_sql: true
@@ -25,12 +25,6 @@ spring:
 
   batch:
     jdbc:
-      initialize-schema: always
+      initialize-schema: none
     job:
-      enabled: true
-
-reddit:
-  client-id: amwqIRRDoPPlkH2y-y0rgA
-  secret: j0q1yAqaqj5eaavcA6hsCoN-Y0t1qw
-  username: YOUR_REDDIT_USERNAME
-  password: YOUR_REDDIT_PASSWORD
+      enabled: false
