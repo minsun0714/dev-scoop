@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "raw_post")
@@ -32,6 +33,13 @@ public class RawPost {
 
     @Column(nullable = false)
     private LocalDateTime createdAt;
+
+    /**
+     * Batch 처리에서만 사용되는 임시 키워드 목록.
+     * DB 컬럼으로 매핑되지 않음.
+     */
+    @Transient
+    private List<String> tempKeywords;
 
     @PrePersist
     public void prePersist() {
