@@ -40,11 +40,11 @@ public class RedisPostConsumer {
                 return;
             }
 
-            String redisKey = KEYWORD_PREFIX + date + ":" + site;
+            String redisKey = KEYWORD_PREFIX + site + ":" + date;
 
-            // 추출된 키워드 Redis에 hincrBy로 카운팅
+            // 추출된 키워드 Redis ZSET에 score로 카운팅
             for (String keyword : keywords) {
-                redisTemplate.opsForHash().increment(redisKey, keyword.toLowerCase(), 1);
+                redisTemplate.opsForZSet().incrementScore(redisKey, keyword.toLowerCase(), 1);
             }
 
             // TTL 48시간
