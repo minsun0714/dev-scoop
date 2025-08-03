@@ -38,3 +38,5 @@ out/
 
 ### PEM ###
 devscoop.pem
+
+.env
