@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/keywords")
-public class KeywordController {
+public class KeywordExtractController {
 
     private final KeywordExtractService keywordExtractService;
 
