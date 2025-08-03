@@ -19,3 +19,7 @@ spring:
       initialize-schema: always
     job:
       enabled: true
+
+  redis:
+    host: ${REDIS_HOST}
+    port: ${REDIS_PORT}
