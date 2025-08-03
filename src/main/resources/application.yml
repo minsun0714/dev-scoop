@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:.env[.properties]
   profiles:
     active: local # 기본값, EC2에서는 prod로 override
 
