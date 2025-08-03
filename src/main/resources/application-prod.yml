@@ -15,6 +15,9 @@ spring:
     host: ${REDIS_HOST}
     port: ${REDIS_PORT}
 
+  elasticsearch:
+    uris: http://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
+
 reddit:
   client-id: ${REDDIT_CLIENT_ID}
   secret: ${REDDIT_SECRET}
@@ -25,8 +28,7 @@ openai:
   api:
     key: ${OPENAI_API_KEY}
 
-elasticsearch:
-  uris: http://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
+
 
 management:
   endpoints:
