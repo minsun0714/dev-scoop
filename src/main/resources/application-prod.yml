@@ -26,8 +26,7 @@ openai:
     key: ${OPENAI_API_KEY}
 
 elasticsearch:
-  host: ${ELASTICSEARCH_HOST}
-  port: ${ELASTICSEARCH_PORT}
+  uris: http://${ELASTICSEARCH_HOST}:${ELASTICSEARCH_PORT}
 
 management:
   endpoints:
