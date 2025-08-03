@@ -1,0 +1,86 @@
+name: "CI/CD: Build and Deploy with Docker Compose"
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  DOCKER_IMAGE_NAME: devscoop-api
+  DOCKER_TAG: latest
+  CONTAINER_NAME: devscoop-api
+
+jobs:
+  build-and-push:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 소스 코드 체크아웃
+        uses: actions/checkout@v3
+
+      - name: JDK 설정
+        uses: actions/setup-java@v3
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Gradlew 실행 권한 부여
+        run: chmod +x gradlew
+
+      - name: Gradle 빌드
+        run: SPRING_PROFILES_ACTIVE=test ./gradlew clean build
+
+      - name: Docker 로그인
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Docker 이미지 빌드 및 태깅
+        run: |
+          REMOTE_IMAGE=${{ secrets.DOCKER_USERNAME }}/$DOCKER_IMAGE_NAME:$DOCKER_TAG
+          docker build -t $DOCKER_IMAGE_NAME:$DOCKER_TAG .
+          docker tag $DOCKER_IMAGE_NAME:$DOCKER_TAG $REMOTE_IMAGE
+          echo "REMOTE_IMAGE=$REMOTE_IMAGE" >> $GITHUB_ENV
+
+      - name: Docker Hub에 이미지 Push
+        run: docker push $REMOTE_IMAGE
+
+  deploy:
+    name: Deploy on EC2 (docker-compose)
+    runs-on: ubuntu-latest
+    needs: build-and-push
+
+    steps:
+      - name: EC2 접속 및 배포
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ec2-user/devscoop  # docker-compose.yml 위치
+
+            echo "🐳 Docker & Compose 버전 확인"
+            docker --version
+            docker-compose --version || sudo apt-get install -y docker-compose
+
+            echo "🧹 오래된 컨테이너/이미지 정리"
+            sudo docker container prune -f
+            sudo docker image prune -f
+
+            echo "📥 최신 이미지 Pull"
+            sudo docker-compose pull devscoop-api
+
+            echo "🚀 서비스 재시작"
+            sudo docker-compose up -d devscoop-api
+
+            echo "🔍 실행중인 컨테이너 상태 확인"
+            sudo docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | grep devscoop-api
+
+            echo "⏳ 컨테이너가 시작될 때까지 대기"
+            sleep 10
+            
+            echo "✅ Health check passed!"
+            echo "🎉 배포 완료"
