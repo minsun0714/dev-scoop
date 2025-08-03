@@ -31,7 +31,8 @@ public class ArticleSearchService {
             // Bool query (must: keyword match, filter: source term)
             BoolQuery.Builder boolQuery = new BoolQuery.Builder()
                     .must(m -> m.multiMatch(mm -> mm
-                            .fields("title^2", "keywords")  // title에 가중치
+                            .fields("title^2", "keywords")
+                            .type(co.elastic.clients.elasticsearch._types.query_dsl.TextQueryType.PhrasePrefix)
                             .query(keyword)
                     ));
 
