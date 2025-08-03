@@ -20,7 +20,6 @@ public class RedisPostConsumer {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    private final TechKeywordExtractor techKeywordExtractor;
 
     private static final String KEYWORD_PREFIX = "keyword_count:";
 
@@ -33,9 +32,14 @@ public class RedisPostConsumer {
             String title = node.get("title").asText();
             String date = LocalDate.now().toString();
 
-            // OpenAI를 이용해 키워드 추출
-            List<String> keywords = techKeywordExtractor.extractKeywords(title);
-            if (keywords.isEmpty()) {
+            // keywords 필드 우선 사용
+            List<String> keywords;
+            if (node.has("keywords")) {
+                keywords = objectMapper.convertValue(
+                        node.get("keywords"),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {}
+                );
+            } else {
                 log.info("[Redis] No tech keywords found for site={}, title={}", site, title);
                 return;
             }

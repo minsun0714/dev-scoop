@@ -30,10 +30,10 @@ public class ArticleSearchService {
         try {
             // Bool query (must: keyword match, filter: source term)
             BoolQuery.Builder boolQuery = new BoolQuery.Builder()
-                    .must(m -> m.match(MatchQuery.of(t -> t
-                            .field("title")
+                    .must(m -> m.multiMatch(mm -> mm
+                            .fields("title^2", "keywords")  // title에 가중치
                             .query(keyword)
-                    )));
+                    ));
 
             if (source != null && !source.isBlank()) {
                 boolQuery.filter(f -> f.term(TermQuery.of(t -> t

@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -33,10 +34,22 @@ public class ElasticSearchPostConsumer {
                     ? Instant.ofEpochSecond(node.get("time").asLong()).toString()
                     : Instant.now().toString();
 
+            // keywords 처리 (producer에서 넣어준 값 사용)
+            List<String> keywords = null;
+            if (node.has("keywords")) {
+                keywords = objectMapper.convertValue(
+                        node.get("keywords"),
+                        new com.fasterxml.jackson.core.type.TypeReference<List<String>>() {}
+                );
+            }
+
             Map<String, Object> document = new HashMap<>();
             document.put("title", title);
             document.put("source", source);
             document.put("createdAt", createdAt);
+            if (keywords != null) {
+                document.put("keywords", keywords);
+            }
 
             // Elasticsearch 색인
             IndexRequest<Map<String, Object>> request = IndexRequest.of(i -> i
