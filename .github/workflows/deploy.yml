@@ -41,6 +41,8 @@ jobs:
           echo "KAFKA_BOOTSTRAP_SERVERS=localhost:9092" >> $GITHUB_ENV
           echo "ELASTICSEARCH_HOST=localhost" >> $GITHUB_ENV
           echo "ELASTICSEARCH_PORT=9200" >> $GITHUB_ENV
+          echo "REDIS_HOST=localhost" >> $GITHUB_ENV      # 추가
+          echo "REDIS_PORT=6379" >> $GITHUB_ENV           # 추가
 
       - name: Gradle 빌드 (test profile)
         run: ./gradlew clean build -Dspring.profiles.active=test
