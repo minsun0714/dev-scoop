@@ -41,14 +41,15 @@ public class RedisPostConsumer {
             }
 
             String redisKey = KEYWORD_PREFIX + site + ":" + date;
+            String allKey = KEYWORD_PREFIX + "all:" + date;
 
-            // 추출된 키워드 Redis ZSET에 score로 카운팅
             for (String keyword : keywords) {
                 redisTemplate.opsForZSet().incrementScore(redisKey, keyword.toLowerCase(), 1);
+                redisTemplate.opsForZSet().incrementScore(allKey, keyword.toLowerCase(), 1);
             }
 
-            // TTL 48시간
             redisTemplate.expire(redisKey, Duration.ofHours(48));
+            redisTemplate.expire(allKey, Duration.ofHours(48));
 
             log.info("[Redis] Updated keyword counts for site={}, title={}, keywords={}", site, title, keywords);
 
