@@ -58,12 +58,54 @@ public class ElasticSearchPostConsumer {
                     .document(document)
             );
 
+            if (keywords != null && !keywords.isEmpty()) {
+                updateKeywordStats(keywords, source);
+            }
+
             esClient.index(request);
 
             log.info("[ES] Indexed raw post: {}", title);
 
         } catch (Exception e) {
             log.error("[ES] Failed to consume raw-posts", e);
+        }
+    }
+
+    private void updateKeywordStats(List<String> keywords, String source) {
+        for (String keyword : keywords) {
+            try {
+                // 1. 기존 문서 조회
+                var response = esClient.get(g -> g
+                        .index("keyword-stats")
+                        .id(keyword), Map.class);
+
+                Map<String, Object> doc = response.found() ? response.source() : new HashMap<>();
+
+                // 2. total_count 갱신
+                int totalCount = (int) doc.getOrDefault("total_count", 0);
+                doc.put("total_count", totalCount + 1);
+
+                // 3. sources.{source} 갱신
+                Map<String, Integer> sources = (Map<String, Integer>) doc.getOrDefault("sources", new HashMap<>());
+                sources.put(source, sources.getOrDefault(source, 0) + 1);
+                doc.put("sources", sources);
+
+                // 4. last_updated 갱신
+                doc.put("last_updated", Instant.now().toString());
+
+                // 5. keyword와 _id 보장
+                doc.put("keyword", keyword);
+
+                // 6. 색인 (없으면 upsert처럼 동작)
+                esClient.index(i -> i
+                        .index("keyword-stats")
+                        .id(keyword)
+                        .document(doc));
+
+                log.info("[ES] Updated keyword stat: {}", keyword);
+            } catch (Exception e) {
+                log.error("[ES] Failed to update keyword stat: {}", keyword, e);
+            }
         }
     }
 }
