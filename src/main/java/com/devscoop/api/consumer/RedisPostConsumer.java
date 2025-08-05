@@ -52,8 +52,8 @@ public class RedisPostConsumer {
                 redisTemplate.opsForZSet().incrementScore(allKey, keyword.toLowerCase(), 1);
             }
 
-            redisTemplate.expire(redisKey, Duration.ofHours(48));
-            redisTemplate.expire(allKey, Duration.ofHours(48));
+            redisTemplate.expire(redisKey, Duration.ofDays(2));
+            redisTemplate.expire(allKey, Duration.ofDays(2));
 
             log.info("[Redis] Updated keyword counts for site={}, title={}, keywords={}", site, title, keywords);
 

@@ -47,7 +47,7 @@ public class CrawlerScheduler {
     private boolean isNewContent(String key, String value) {
         Long added = redisTemplate.opsForSet().add(key, value);
         if (added != null && added == 1) {
-            redisTemplate.expire(key, Duration.ofDays(7));
+            redisTemplate.expire(key, Duration.ofDays(2));
             return true;
         }
         return false;
