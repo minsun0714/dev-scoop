@@ -1,30 +1,31 @@
 package com.devscoop.api.service;
 
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.GetResponse;
 import com.devscoop.api.dto.KeywordRankingDto;
-import com.devscoop.api.entity.KeywordStat;
-import com.devscoop.api.publisher.PreloadPublisher;
-import com.devscoop.api.repository.KeywordStatRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KeywordRankingService {
 
-    private final static double ALPHA = 1.0;
+    private static final double ALPHA = 1.0;
+    private static final List<String> SOURCES = List.of("github", "hn", "reddit");
 
     private final RedisTemplate<String, String> redisTemplate;
-    private final KeywordStatRepository keywordStatRepository;
-    private final PreloadPublisher preloadPublisher;
+    private final ElasticsearchClient esClient;
 
-    public List<KeywordRankingDto> getKeywordRanking(String source, int limit){
-
+    public List<KeywordRankingDto> getKeywordRanking(String source, int limit) {
         Map<String, Integer> todayCounts = fetchKeywordCounts(source, LocalDate.now(), limit);
         Map<String, Integer> yesterdayCounts = fetchKeywordCounts(source, LocalDate.now().minusDays(1), limit);
 
@@ -34,9 +35,8 @@ public class KeywordRankingService {
                     int todayCount = entry.getValue();
                     int yesterdayCount = yesterdayCounts.getOrDefault(keyword, 0);
 
-                    KeywordStat keywordStat = getKeywordStats(source, keyword);
-
-                    double score = calcTrendScore(todayCount, yesterdayCount, keywordStat.getMean(), keywordStat.getStd());
+                    Stat stat = getKeywordStat(source, keyword);
+                    double score = calcTrendScore(todayCount, yesterdayCount, stat.mean, stat.std);
 
                     return KeywordRankingDto.builder()
                             .keyword(keyword)
@@ -53,7 +53,6 @@ public class KeywordRankingService {
     private Map<String, Integer> fetchKeywordCounts(String source, LocalDate date, int limit) {
         String key = "keyword_count:" + source + ":" + date;
 
-        // ZSET에서 상위 100개만 가져오기
         Set<ZSetOperations.TypedTuple<String>> tuples =
                 redisTemplate.opsForZSet().reverseRangeWithScores(key, 0, limit * 2L);
 
@@ -72,35 +71,83 @@ public class KeywordRankingService {
         return result;
     }
 
-    private KeywordStat getKeywordStats(String source, String keyword) {
-        String key = "keyword_stats:" + source + ":" + keyword;
-        List<Object> values = redisTemplate.opsForHash().multiGet(key, List.of("mean", "std"));
+    private Stat getKeywordStat(String source, String keyword) {
+        if (!"all".equals(source)) {
+            return getSingleSourceStat(source, keyword);
+        }
 
-        // 1. Redis cache hit
-        if (values.get(0) != null && values.get(1) != null) {
-            return KeywordStat.of(
-                    source,
-                    keyword,
-                    Double.parseDouble(values.get(0).toString()),
-                    Double.parseDouble(values.get(1).toString())
+        List<Stat> stats = SOURCES.stream()
+                .map(s -> getSingleSourceStat(s, keyword))
+                .filter(Objects::nonNull)
+                .filter(stat -> stat.count > 0)
+                .toList();
+
+        if (stats.isEmpty()) return new Stat(0.0, 1.0, 1L);
+
+        double totalCount = stats.stream().mapToDouble(s -> s.count).sum();
+
+        double weightedMean = stats.stream()
+                .mapToDouble(s -> s.mean * s.count)
+                .sum() / totalCount;
+
+        double weightedVariance = stats.stream()
+                .mapToDouble(s -> s.count * Math.pow(s.mean - weightedMean, 2))
+                .sum() / totalCount;
+
+        double weightedStd = Math.sqrt(weightedVariance);
+
+        return new Stat(weightedMean, weightedStd, (long) totalCount);
+    }
+
+    private Stat getSingleSourceStat(String source, String keyword) {
+        String redisKey = "keyword_stats:" + source + ":" + keyword;
+        List<Object> cached = redisTemplate.opsForHash().multiGet(redisKey, List.of("mean", "std", "count"));
+
+        if (cached.get(0) != null && cached.get(1) != null && cached.get(2) != null) {
+            return new Stat(
+                    Double.parseDouble(cached.get(0).toString()),
+                    Double.parseDouble(cached.get(1).toString()),
+                    Long.parseLong(cached.get(2).toString())
             );
         }
 
-        // 2. cache miss → DB fallback (동기)
-        KeywordStat sourceStats = keywordStatRepository.findBySourceAndKeyword(source, keyword)
-                .orElse(KeywordStat.of(source, keyword, 0.0, 1.0));
+        try {
+            GetResponse<Map> response = esClient.get(g -> g
+                    .index("keyword-stats")
+                    .id(keyword), Map.class);
 
-        // Redis에 source scope mean/std 비동기 큐 발행 전 데이터를 임시로 저장
-        String sourceKey = "keyword_stats:" + source + ":" + keyword;
-        redisTemplate.opsForHash().put(sourceKey, "mean", String.valueOf(sourceStats.getMean()));
-        redisTemplate.opsForHash().put(sourceKey, "std", String.valueOf(sourceStats.getStd()));
-        redisTemplate.expire(sourceKey, java.time.Duration.ofHours(24));
+            if (!response.found()) {
+                log.warn("[ES] No stats found for '{}:{}'", source, keyword);
+                return new Stat(0.0, 1.0, 1L);
+            }
 
-        // 3. 비동기 큐 발행
-        preloadPublisher.publishPreloadRequest(source, keyword);
-        if (!"all".equals(source)) preloadPublisher.publishPreloadRequest("all", keyword);
+            Map<String, Object> doc = response.source();
+            if (doc == null) return new Stat(0.0, 1.0, 1L);
 
-        return sourceStats;
+            double mean = ((Number) doc.getOrDefault("mean", 0.0)).doubleValue();
+            double std = ((Number) doc.getOrDefault("std_dev", 1.0)).doubleValue();
+
+            long count;
+            if ("all".equals(source)) {
+                count = ((Number) doc.getOrDefault("total_count", 1)).longValue();
+            } else {
+                Map<String, Object> sources = (Map<String, Object>) doc.get("sources");
+                count = (sources != null && sources.get(source) != null)
+                        ? ((Number) sources.get(source)).longValue()
+                        : 1L;
+            }
+
+            redisTemplate.opsForHash().put(redisKey, "mean", String.valueOf(mean));
+            redisTemplate.opsForHash().put(redisKey, "std", String.valueOf(std));
+            redisTemplate.opsForHash().put(redisKey, "count", String.valueOf(count));
+            redisTemplate.expire(redisKey, Duration.ofDays(2));
+
+            return new Stat(mean, std, count);
+
+        } catch (Exception e) {
+            log.error("[ES] Failed to fetch stat for '{}:{}'", source, keyword, e);
+            return new Stat(0.0, 1.0, 1L);
+        }
     }
 
     private double calcTrendScore(int todayCount, int yesterdayCount, double mean, double std) {
@@ -109,4 +156,5 @@ public class KeywordRankingService {
         return growth * standardized;
     }
 
+    private record Stat(double mean, double std, long count) {}
 }
