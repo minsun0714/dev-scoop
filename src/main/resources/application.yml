@@ -16,10 +16,11 @@ spring:
 
   batch:
     jdbc:
-      initialize-schema: always
+      initialize-schema: never
     job:
-      enabled: true
+      enabled: false
 
   redis:
     host: ${REDIS_HOST}
     port: ${REDIS_PORT}
+    notify-keyspace-events: Ex
