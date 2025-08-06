@@ -133,7 +133,7 @@ public class HackerNewsCrawler {
                 .source("hackernews")
                 .title(node.path("title").asText())
                 .url(node.path("url").asText(""))
-                .postedAt(dateTime)
+                .createdAt(dateTime)
                 .build();
     }
 
@@ -164,7 +164,7 @@ public class HackerNewsCrawler {
                 .source("hackernews")
                 .title(node.path("title").asText())
                 .url(node.path("url").asText(""))
-                .postedAt(toLocalDateTime(node.path("time").asLong()))
+                .createdAt(toLocalDateTime(node.path("time").asLong()))
                 .build();
     }
 

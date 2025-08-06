@@ -63,7 +63,7 @@ public class RedditCrawler {
                             .source("reddit")
                             .title(post.path("title").asText())
                             .url("https://reddit.com" + post.path("permalink").asText())
-                            .postedAt(toLocalDateTime(post.path("created_utc").asLong()))
+                            .createdAt(toLocalDateTime(post.path("created_utc").asLong()))
                             .build())
                     .toList();
 
@@ -129,7 +129,7 @@ public class RedditCrawler {
                                     .source("reddit")
                                     .title(data.path("title").asText())
                                     .url("https://reddit.com" + data.path("permalink").asText())
-                                    .postedAt(toLocalDateTime(createdUtc))
+                                    .createdAt(toLocalDateTime(createdUtc))
                                     .build()
                     );
                 }

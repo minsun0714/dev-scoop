@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -35,15 +36,12 @@ public class CrawlerScheduler {
     @Scheduled(fixedRate = 300_000)
     public void crawlAll() {
         CompletableFuture<Void> hackerNewsFuture = CompletableFuture.runAsync(this::crawlHackerNews, executor);
-        CompletableFuture<Void> githubFuture = CompletableFuture.runAsync(this::crawlDevto, executor);
+        CompletableFuture<Void> devtoFuture = CompletableFuture.runAsync(this::crawlDevto, executor);
         CompletableFuture<Void> redditFuture = CompletableFuture.runAsync(this::crawlReddit, executor);
 
-        CompletableFuture.allOf(hackerNewsFuture, githubFuture, redditFuture).join();
+        CompletableFuture.allOf(hackerNewsFuture, devtoFuture, redditFuture).join();
     }
 
-    /**
-     * Redis에 key:value 저장 시도, 새로 추가되었으면 true 반환
-     */
     private boolean isNewContent(String key, String value) {
         Long added = redisTemplate.opsForSet().add(key, value);
         if (added != null && added == 1) {
@@ -53,22 +51,21 @@ public class CrawlerScheduler {
         return false;
     }
 
-
-
     private void crawlHackerNews() {
         try {
-            var stories = hackerNewsCrawler.fetchTopStories(10); // List<RawPostDto>
+            var stories = hackerNewsCrawler.fetchTopStories(10);
             for (RawPostDto story : stories) {
-                // 중복 여부를 url 기준으로 체크
-                String uniqueKey = story.getUrl().isBlank() ? story.getTitle() : story.getUrl();
+                String uniqueKey = story.url().isBlank() ? story.title() : story.url();
                 if (!isNewContent("seen:hackernews", uniqueKey)) continue;
 
-                String json = mapper.createObjectNode()
-                        .put("source", story.getSource())
-                        .put("title", story.getTitle())
-                        .put("url", story.getUrl())
-                        .put("time", story.getPostedAt().toEpochSecond(java.time.ZoneOffset.UTC))
-                        .toString();
+                RawPostDto dto = RawPostDto.builder()
+                        .source(story.source())
+                        .title(story.title())
+                        .url(story.url())
+                        .createdAt(story.createdAt())
+                        .build();
+
+                String json = mapper.writeValueAsString(dto);
                 producer.send(TOPIC, "hackernews", json);
             }
         } catch (Exception e) {
@@ -78,17 +75,19 @@ public class CrawlerScheduler {
 
     private void crawlReddit() {
         try {
-            var posts = redditCrawler.fetchTopPosts(10); // List<RawPostDto>
+            var posts = redditCrawler.fetchTopPosts(10);
             for (RawPostDto post : posts) {
-                String uniqueKey = post.getUrl().isBlank() ? post.getTitle() : post.getUrl();
+                String uniqueKey = post.url().isBlank() ? post.title() : post.url();
                 if (!isNewContent("seen:reddit", uniqueKey)) continue;
 
-                String json = mapper.createObjectNode()
-                        .put("source", post.getSource())
-                        .put("title", post.getTitle())
-                        .put("url", post.getUrl())
-                        .put("time", post.getPostedAt().toEpochSecond(java.time.ZoneOffset.UTC))
-                        .toString();
+                RawPostDto dto = RawPostDto.builder()
+                        .source(post.source())
+                        .title(post.title())
+                        .url(post.url())
+                        .createdAt(post.createdAt())
+                        .build();
+
+                String json = mapper.writeValueAsString(dto);
                 producer.send(TOPIC, "reddit", json);
             }
         } catch (Exception e) {
@@ -98,21 +97,23 @@ public class CrawlerScheduler {
 
     private void crawlDevto() {
         try {
-            var posts = devtoCrawler.fetchTopPosts(10); // List<RawPostDto>
+            var posts = devtoCrawler.fetchTopPosts(10);
             for (RawPostDto post : posts) {
-                String uniqueKey = post.getUrl().isBlank() ? post.getTitle() : post.getUrl();
+                String uniqueKey = post.url().isBlank() ? post.title() : post.url();
                 if (!isNewContent("seen:devto", uniqueKey)) continue;
 
-                String json = mapper.createObjectNode()
-                        .put("source", post.getSource())
-                        .put("title", post.getTitle())
-                        .put("url", post.getUrl())
-                        .put("time", post.getPostedAt().toEpochSecond(java.time.ZoneOffset.UTC))
-                        .toString();
+                RawPostDto dto = RawPostDto.builder()
+                        .source(post.source())
+                        .title(post.title())
+                        .url(post.url())
+                        .createdAt(post.createdAt())
+                        .build();
+
+                String json = mapper.writeValueAsString(dto);
                 producer.send(TOPIC, "devto", json);
             }
         } catch (Exception e) {
-            log.error("Error during devto", e);
+            log.error("Error during crawlDevto", e);
         }
     }
 }
