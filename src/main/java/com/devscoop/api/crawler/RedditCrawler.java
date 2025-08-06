@@ -34,16 +34,16 @@ public class RedditCrawler {
     private final ObjectMapper mapper;
     private final HttpClient client = HttpClient.newHttpClient();
 
-    @Value("${reddit.client-id}")
+    @Value("${REDDIT_CLIENT_ID}")
     private String CLIENT_ID;
 
-    @Value("${reddit.secret}")
+    @Value("${REDDIT_SECRET}")
     private String CLIENT_SECRET;
 
-    @Value("${reddit.username}")
+    @Value("${REDDIT_USERNAME}")
     private String redditUsername;
 
-    @Value("${reddit.password}")
+    @Value("${REDDIT_PASSWORD}")
     private String redditPassword;
 
     /**
