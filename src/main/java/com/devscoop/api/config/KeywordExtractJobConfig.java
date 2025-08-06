@@ -18,6 +18,7 @@ import org.springframework.batch.core.step.builder.StepBuilder;
 import org.springframework.batch.item.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -29,6 +30,7 @@ import java.util.*;
 @Configuration
 @EnableBatchProcessing
 @RequiredArgsConstructor
+@Profile("!test")
 public class KeywordExtractJobConfig {
 
     private final ElasticsearchClient esClient;
