@@ -30,31 +30,31 @@ public class KeywordRankingService {
         Map<String, Integer> yesterdayCounts = fetchKeywordCounts(source, LocalDate.now().minusDays(1), limit);
 
         return todayCounts.entrySet().stream()
-                .map(entry -> {
-                    String keyword = entry.getKey();
-                    int todayCount = entry.getValue();
-                    int yesterdayCount = yesterdayCounts.getOrDefault(keyword, 0);
+            .map(entry -> {
+                String keyword = entry.getKey();
+                int todayCount = entry.getValue();
+                int yesterdayCount = yesterdayCounts.getOrDefault(keyword, 0);
 
-                    Stat stat = getKeywordStat(source, keyword);
-                    double score = calcTrendScore(todayCount, yesterdayCount, stat.mean, stat.std);
+                Stat stat = getKeywordStat(source, keyword);
+                double score = calcTrendScore(todayCount, yesterdayCount, stat.mean, stat.std);
 
-                    return KeywordRankingDto.builder()
-                            .keyword(keyword)
-                            .todayCount(todayCount)
-                            .yesterdayCount(yesterdayCount)
-                            .score(score)
-                            .build();
-                })
-                .sorted(Comparator.comparingDouble(KeywordRankingDto::score).reversed())
-                .limit(limit)
-                .collect(Collectors.toList());
+                return KeywordRankingDto.builder()
+                    .keyword(keyword)
+                    .todayCount(todayCount)
+                    .yesterdayCount(yesterdayCount)
+                    .score(score)
+                    .build();
+            })
+            .sorted(Comparator.comparingDouble(KeywordRankingDto::score).reversed())
+            .limit(limit)
+            .collect(Collectors.toList());
     }
 
     private Map<String, Integer> fetchKeywordCounts(String source, LocalDate date, int limit) {
         String key = "keyword_count:" + source + ":" + date;
 
         Set<ZSetOperations.TypedTuple<String>> tuples =
-                redisTemplate.opsForZSet().reverseRangeWithScores(key, 0, limit * 2L);
+            redisTemplate.opsForZSet().reverseRangeWithScores(key, 0, limit * 2L);
 
         Map<String, Integer> result = new HashMap<>();
 
@@ -72,29 +72,47 @@ public class KeywordRankingService {
     }
 
     private Stat getKeywordStat(String source, String keyword) {
-        if (!"all".equals(source)) {
-            return getSingleSourceStat(source, keyword);
+        return "all".equals(source)
+            ? getCombinedSourceStat(keyword)
+            : getSingleSourceStat(source, keyword);
+    }
+
+    private Stat getCombinedSourceStat(String keyword) {
+        String redisKey = "keyword_stats:all:" + keyword;
+        List<Object> cached = redisTemplate.opsForHash().multiGet(redisKey, List.of("mean", "std", "count"));
+
+        if (cached != null && cached.stream().noneMatch(Objects::isNull)) {
+            return new Stat(
+                Double.parseDouble(cached.get(0).toString()),
+                Double.parseDouble(cached.get(1).toString()),
+                Long.parseLong(cached.get(2).toString())
+            );
         }
 
         List<Stat> stats = SOURCES.stream()
-                .map(s -> getSingleSourceStat(s, keyword))
-                .filter(Objects::nonNull)
-                .filter(stat -> stat.count > 0)
-                .toList();
+            .map(s -> getSingleSourceStat(s, keyword))
+            .filter(Objects::nonNull)
+            .filter(stat -> stat.count > 0)
+            .toList();
 
         if (stats.isEmpty()) return new Stat(0.0, 1.0, 1L);
 
         double totalCount = stats.stream().mapToDouble(s -> s.count).sum();
 
         double weightedMean = stats.stream()
-                .mapToDouble(s -> s.mean * s.count)
-                .sum() / totalCount;
+            .mapToDouble(s -> s.mean * s.count)
+            .sum() / totalCount;
 
         double weightedVariance = stats.stream()
-                .mapToDouble(s -> s.count * Math.pow(s.mean - weightedMean, 2))
-                .sum() / totalCount;
+            .mapToDouble(s -> s.count * Math.pow(s.mean - weightedMean, 2))
+            .sum() / totalCount;
 
         double weightedStd = Math.sqrt(weightedVariance);
+
+        redisTemplate.opsForHash().put(redisKey, "mean", String.valueOf(weightedMean));
+        redisTemplate.opsForHash().put(redisKey, "std", String.valueOf(weightedStd));
+        redisTemplate.opsForHash().put(redisKey, "count", String.valueOf((long) totalCount));
+        redisTemplate.expire(redisKey, Duration.ofDays(2));
 
         return new Stat(weightedMean, weightedStd, (long) totalCount);
     }
@@ -103,27 +121,22 @@ public class KeywordRankingService {
         String redisKey = "keyword_stats:" + source + ":" + keyword;
         List<Object> cached = redisTemplate.opsForHash().multiGet(redisKey, List.of("mean", "std", "count"));
 
-        if (cached.get(0) != null && cached.get(1) != null && cached.get(2) != null) {
+        if (cached != null && cached.stream().noneMatch(Objects::isNull)) {
             return new Stat(
-                    Double.parseDouble(cached.get(0).toString()),
-                    Double.parseDouble(cached.get(1).toString()),
-                    Long.parseLong(cached.get(2).toString())
+                Double.parseDouble(cached.get(0).toString()),
+                Double.parseDouble(cached.get(1).toString()),
+                Long.parseLong(cached.get(2).toString())
             );
         }
 
         try {
-            GetResponse<Map> response = esClient.get(g -> g
-                    .index("keyword-stats")
-                    .id(keyword), Map.class);
-
-            if (!response.found()) {
+            GetResponse<Map> response = esClient.get(g -> g.index("keyword-stats").id(keyword), Map.class);
+            if (!response.found() || response.source() == null) {
                 log.warn("[ES] No stats found for '{}:{}'", source, keyword);
                 return new Stat(0.0, 1.0, 1L);
             }
 
             Map<String, Object> doc = response.source();
-            if (doc == null) return new Stat(0.0, 1.0, 1L);
-
             double mean = ((Number) doc.getOrDefault("mean", 0.0)).doubleValue();
             double std = ((Number) doc.getOrDefault("std_dev", 1.0)).doubleValue();
 
@@ -133,8 +146,8 @@ public class KeywordRankingService {
             } else {
                 Map<String, Object> sources = (Map<String, Object>) doc.get("sources");
                 count = (sources != null && sources.get(source) != null)
-                        ? ((Number) sources.get(source)).longValue()
-                        : 1L;
+                    ? ((Number) sources.get(source)).longValue()
+                    : 1L;
             }
 
             redisTemplate.opsForHash().put(redisKey, "mean", String.valueOf(mean));
