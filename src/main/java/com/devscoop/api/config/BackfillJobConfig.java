@@ -1,10 +1,10 @@
 package com.devscoop.api.config;
 
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.IndexRequest;
 import com.devscoop.api.crawler.*;
 import com.devscoop.api.dto.RawPostDto;
-import com.devscoop.api.entity.RawPost;
 import com.devscoop.api.reader.IteratorItemReader;
-import com.devscoop.api.repository.RawPostRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
@@ -29,13 +29,10 @@ public class BackfillJobConfig {
     private final HackerNewsCrawler hackerNewsCrawler;
     private final RedditCrawler redditCrawler;
     private final DevtoCrawler devtoCrawler;
-    private final RawPostRepository repository;
+    private final ElasticsearchClient esClient;
     private final JobRepository jobRepository;
     private final PlatformTransactionManager transactionManager;
 
-    /**
-     * 전체 백필 Job
-     */
     @Bean
     public Job backfillJob() {
         return new JobBuilder("backfillJob", jobRepository)
@@ -46,9 +43,6 @@ public class BackfillJobConfig {
                 .build();
     }
 
-    /**
-     * HackerNews 6개월치 데이터를 직접 DB에 저장
-     */
     @Bean
     public Step hackerNewsStep() {
         LocalDateTime end = LocalDateTime.now();
@@ -56,32 +50,24 @@ public class BackfillJobConfig {
 
         List<RawPostDto> dtos = hackerNewsCrawler.fetchByDateRange(start, end)
                 .stream()
-                .filter(dto -> !dto.getPostedAt().isBefore(start))
+                .filter(dto -> dto.createdAt() != null && !dto.createdAt().isBefore(start))
                 .toList();
 
         log.info(">>> HackerNews Step will process {} items", dtos.size());
 
         return new StepBuilder("hackerNewsStep", jobRepository)
-                .<RawPostDto, RawPost>chunk(1000, transactionManager)
+                .<RawPostDto, RawPostDto>chunk(1000, transactionManager)
                 .reader(new IteratorItemReader<>(dtos.iterator()))
-                .processor(dto -> RawPost.builder()
-                        .source(dto.getSource())
-                        .title(dto.getTitle())
-                        .url(dto.getUrl())
-                        .createdAt(dto.getPostedAt())
+                .processor(dto -> RawPostDto.builder()
+                        .source(dto.source())
+                        .title(dto.title())
+                        .url(dto.url())
+                        .createdAt(dto.createdAt())
                         .build())
                 .writer(items -> {
-                    log.info("Writer called with {} items", items.size());
-                    for (RawPost post : items) {
-                        try {
-                            repository.saveAndFlush(post);  // 개별 flush
-                        } catch (Exception e) {
-                            log.error("Failed to save post: titleLen={} urlLen={} url={}",
-                                    post.getTitle().length(),
-                                    post.getUrl().length(),
-                                    post.getUrl(), e);
-                            throw e;
-                        }
+                    log.info(">>> Writing {} items to Elasticsearch", items.size());
+                    for (RawPostDto post : items) {
+                        indexDocument(post);
                     }
                 })
                 .allowStartIfComplete(true)
@@ -97,16 +83,16 @@ public class BackfillJobConfig {
 
                     List<RawPostDto> dtos = redditCrawler.fetchByDateRange(start, end);
 
-                    repository.saveAll(
-                            dtos.stream()
-                                    .map(dto -> RawPost.builder()
-                                            .source(dto.getSource())
-                                            .title(dto.getTitle())
-                                            .url(dto.getUrl())
-                                            .createdAt(dto.getPostedAt())
-                                            .build())
-                                    .toList()
-                    );
+                    for (RawPostDto dto : dtos) {
+                        RawPostDto post = RawPostDto.builder()
+                                .source(dto.source())
+                                .title(dto.title())
+                                .url(dto.url())
+                                .createdAt(dto.createdAt())
+                                .build();
+                        indexDocument(post);
+                    }
+
                     log.info("Reddit backfill complete ({} items)", dtos.size());
                     return RepeatStatus.FINISHED;
                 }, transactionManager)
@@ -123,20 +109,41 @@ public class BackfillJobConfig {
 
                     List<RawPostDto> dtos = devtoCrawler.fetchByDateRange(start, end);
 
-                    repository.saveAll(
-                            dtos.stream()
-                                    .map(dto -> RawPost.builder()
-                                            .source(dto.getSource())
-                                            .title(dto.getTitle())
-                                            .url(dto.getUrl())
-                                            .createdAt(dto.getPostedAt())
-                                            .build())
-                                    .toList()
-                    );
+                    for (RawPostDto dto : dtos) {
+                        RawPostDto post = RawPostDto.builder()
+                                .source(dto.source())
+                                .title(dto.title())
+                                .url(dto.url())
+                                .createdAt(dto.createdAt())
+                                .build();
+                        indexDocument(post);
+                    }
+
                     log.info("Dev.to backfill complete ({} items)", dtos.size());
                     return RepeatStatus.FINISHED;
                 }, transactionManager)
                 .allowStartIfComplete(true)
                 .build();
+    }
+
+    /**
+     * 공통 색인 메서드 (PUT 오류 방지용 id 조건 처리 포함)
+     */
+    private void indexDocument(RawPostDto post) {
+        try {
+            IndexRequest.Builder<RawPostDto> builder = new IndexRequest.Builder<RawPostDto>()
+                    .index("raw-posts")
+                    .document(post);
+
+            if (post.url() != null && !post.url().isBlank()) {
+                builder.id(post.url()); // URL을 문서 ID로 사용
+            }
+
+            esClient.index(builder.build());
+
+        } catch (Exception e) {
+            log.error("Failed to index post: url={} title={}", post.url(), post.title(), e);
+            throw new RuntimeException(e);
+        }
     }
 }

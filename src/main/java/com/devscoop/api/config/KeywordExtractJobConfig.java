@@ -1,36 +1,40 @@
 package com.devscoop.api.config;
 
-import com.devscoop.api.entity.RawPost;
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.core.IndexRequest;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch.core.search.Hit;
+import com.devscoop.api.dto.RawPostDto;
 import com.devscoop.api.extractor.TechKeywordExtractor;
-import com.devscoop.api.repository.KeywordFreqRepository;
-import jakarta.persistence.EntityManagerFactory;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.batch.item.ItemWriter;
-import org.springframework.batch.item.database.JpaPagingItemReader;
-import org.springframework.batch.item.database.builder.JpaPagingItemReaderBuilder;
+import org.springframework.batch.item.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import java.util.List;
+import java.time.LocalDateTime;
+import java.util.*;
 
+@Slf4j
 @Configuration
 @EnableBatchProcessing
 @RequiredArgsConstructor
+@Profile("!test")
 public class KeywordExtractJobConfig {
 
-    private final EntityManagerFactory emf;
+    private final ElasticsearchClient esClient;
     private final TechKeywordExtractor extractor;
-    private final KeywordFreqRepository keywordFreqRepository;
 
     private static final int CHUNK_SIZE = 50;
 
@@ -46,59 +50,94 @@ public class KeywordExtractJobConfig {
     public Step keywordExtractStep(JobRepository jobRepository,
                                    PlatformTransactionManager transactionManager) {
         return new StepBuilder("keywordExtractStep", jobRepository)
-                .<RawPost, RawPost>chunk(CHUNK_SIZE, transactionManager)
-                .reader(rawPostReader())
+                .<RawPostDto, RawPostDto>chunk(CHUNK_SIZE, transactionManager)
+                .reader(elasticsearchReader())
                 .processor(keywordProcessor())
-                .writer(keywordWriter())
-                .taskExecutor(taskExecutor()) // 병렬 실행 추가
+                .writer(noopWriter())
+                .taskExecutor(taskExecutor())
                 .build();
     }
 
     @Bean
-    public TaskExecutor taskExecutor() {
-        // SimpleAsyncTaskExecutor는 스레드를 빠르게 만들어주는 가벼운 Executor
-        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("batch-thread-");
-        executor.setConcurrencyLimit(8); // 동시에 최대 8개까지
-        return executor;
+    public ItemReader<RawPostDto> elasticsearchReader() {
+        return new ItemReader<>() {
+            private final Iterator<Hit<RawPostDto>> iterator;
+
+            {
+                try {
+                    SearchRequest request = SearchRequest.of(s -> s
+                            .index("raw-posts")
+                            .size(1000));
+
+                    SearchResponse<RawPostDto> response = esClient.search(request, RawPostDto.class);
+                    iterator = response.hits().hits().iterator();
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to initialize ES reader", e);
+                }
+            }
+
+            @Override
+            public RawPostDto read() {
+                return iterator.hasNext() ? iterator.next().source() : null;
+            }
+        };
     }
 
     @Bean
-    public JpaPagingItemReader<RawPost> rawPostReader() {
-        return new JpaPagingItemReaderBuilder<RawPost>()
-                .name("rawPostReader")
-                .entityManagerFactory(emf)
-                .queryString("SELECT r FROM RawPost r ORDER BY r.id ASC")
-                .pageSize(CHUNK_SIZE)
-                .build();
-    }
-
-    @Bean
-    public ItemProcessor<RawPost, RawPost> keywordProcessor() {
+    public ItemProcessor<RawPostDto, RawPostDto> keywordProcessor() {
         return post -> {
-            List<String> keywords = extractor.extractKeywords(post.getTitle());
-            post.setTempKeywords(keywords);
+            List<String> keywords = extractor.extractKeywords(post.title());
+
+            for (String keyword : keywords) {
+                try {
+                    upsertKeywordStat(keyword, post.source());
+                } catch (Exception e) {
+                    log.warn("[ES Upsert] Failed: keyword={} source={}", keyword, post.source(), e);
+                }
+            }
+
             return post;
         };
     }
 
     @Bean
-    public ItemWriter<RawPost> keywordWriter() {
-        return items -> {
-            for (RawPost post : items) {
-                List<String> keywords = post.getTempKeywords();
-                if (keywords == null) continue;
-                for (String keyword : keywords) {
-                    try {
-                        keywordFreqRepository.upsert(
-                                keyword,
-                                post.getSource(),
-                                post.getCreatedAt().toLocalDate()
-                        );
-                    } catch (Exception e) {
-                        // 에러 무시하고 진행
-                    }
-                }
-            }
-        };
+    public ItemWriter<RawPostDto> noopWriter() {
+        return items -> {};
+    }
+
+    private void upsertKeywordStat(String keyword, String source) throws Exception {
+        var getRes = esClient.get(g -> g.index("keyword-stats").id(keyword), Map.class);
+
+        Map<String, Object> doc = new HashMap<>();
+        Map<String, Object> sources = new HashMap<>();
+        int total = 1;
+
+        if (getRes.found()) {
+            Map<String, Object> existing = getRes.source();
+            total = ((Number) existing.getOrDefault("total_count", 0)).intValue() + 1;
+            Map<String, Object> existingSources = (Map<String, Object>) existing.getOrDefault("sources", new HashMap<>());
+            int srcCount = ((Number) existingSources.getOrDefault(source, 0)).intValue() + 1;
+            sources.putAll(existingSources);
+            sources.put(source, srcCount);
+        } else {
+            sources.put(source, 1);
+        }
+
+        doc.put("keyword", keyword);
+        doc.put("total_count", total);
+        doc.put("sources", sources);
+        doc.put("last_updated", LocalDateTime.now().toString());
+
+        esClient.index(IndexRequest.of(r -> r
+                .index("keyword-stats")
+                .id(keyword)
+                .document(doc)));
+    }
+
+    @Bean
+    public TaskExecutor taskExecutor() {
+        SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("batch-thread-");
+        executor.setConcurrencyLimit(8);
+        return executor;
     }
 }

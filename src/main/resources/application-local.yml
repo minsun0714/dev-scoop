@@ -1,4 +1,10 @@
 spring:
+
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: never
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
     producer:
@@ -8,12 +14,6 @@ spring:
   redis:
     host: localhost
     port: 6379
-
-  datasource:
-    url: ${MYSQL_URL}
-    username: ${MYSQL_USERNAME}
-    password: ${MYSQL_PASSWORD}
-    driver-class-name: com.mysql.cj.jdbc.Driver
 
 reddit:
   client-id: ${REDDIT_CLIENT_ID}

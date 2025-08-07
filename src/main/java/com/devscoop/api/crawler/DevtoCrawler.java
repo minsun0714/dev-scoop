@@ -54,7 +54,7 @@ public class DevtoCrawler {
                             .source("devto")
                             .title(title)
                             .url(urlLink)
-                            .postedAt(postedAt)
+                            .createdAt(postedAt)
                             .build());
                 }
                 page++;
@@ -100,7 +100,7 @@ public class DevtoCrawler {
                                 .source("devto")
                                 .title(item.path("title").asText())
                                 .url(item.path("url").asText())
-                                .postedAt(postedAt)
+                                .createdAt(postedAt)
                                 .build());
                     }
                 }
