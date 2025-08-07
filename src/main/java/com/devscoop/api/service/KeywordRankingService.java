@@ -6,12 +6,15 @@ import co.elastic.clients.elasticsearch.core.mget.MultiGetResponseItem;
 import com.devscoop.api.dto.KeywordRankingDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -21,39 +24,46 @@ import java.util.stream.Collectors;
 public class KeywordRankingService {
 
     private static final double ALPHA = 1.0;
-    private static final List<String> SOURCES = List.of("github", "hackernews", "reddit");
+    private static final List<String> SOURCES = List.of("all", "github", "hackernews", "reddit");
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ElasticsearchClient esClient;
 
+    private List<Double> zscoreBatch(String key, List<String> members) {
+        List<Object> raw = redisTemplate.executePipelined((RedisCallback<?>) conn -> {
+            var s = conn.stringCommands(); // 필요없어도 호출해야 파이프라인 시작
+            var z = conn.zSetCommands();
+            for (String m : members) z.zScore(key.getBytes(StandardCharsets.UTF_8), m.getBytes(StandardCharsets.UTF_8));
+            return null;
+        });
+        return raw.stream().map(o -> (Double) o).toList();
+    }
+
     public List<KeywordRankingDto> getKeywordRanking(String source, int limit) {
-        Map<String, Integer> todayCounts = fetchKeywordCounts(source, LocalDate.now(), limit);
-        Map<String, Integer> yesterdayCounts = fetchKeywordCounts(source, LocalDate.now().minusDays(1), limit);
+        var todayCounts = fetchKeywordCounts(source, LocalDate.now(KST), limit); // 오늘은 top N만
+        var todayKeywords = new ArrayList<>(todayCounts.keySet());
 
-        Set<String> allKeywords = new HashSet<>(todayCounts.keySet());
-        allKeywords.addAll(yesterdayCounts.keySet());
+        String yKey = "keyword_count:" + source + ":" + LocalDate.now(KST).minusDays(1);
+        var yScores = zscoreBatch(yKey, todayKeywords); // 어제는 오늘 키만 ZSCORE
 
-        Map<String, Stat> statMap = fetchKeywordStatsBulk(source, allKeywords);
+        Map<String, Stat> statMap = fetchKeywordStatsBulk(source, new HashSet<>(todayKeywords));
 
-        return todayCounts.entrySet().stream()
-                .map(entry -> {
-                    String keyword = entry.getKey();
-                    int todayCount = entry.getValue();
-                    int yesterdayCount = yesterdayCounts.getOrDefault(keyword, 0);
+        List<KeywordRankingDto> out = new ArrayList<>();
+        for (int i = 0; i < todayKeywords.size(); i++) {
+            String kw = todayKeywords.get(i);
+            int today = todayCounts.get(kw);
+            int yesterday = yScores.get(i) == null ? 0 : (int) Math.round(yScores.get(i));
+            Stat st = statMap.getOrDefault(kw, new Stat(0.0, 1.0, 1L));
+            double score = calcTrendScore(today, yesterday, st.mean, st.std);
+            out.add(KeywordRankingDto.builder()
+                    .keyword(kw).todayCount(today).yesterdayCount(yesterday).score(score).build());
+        }
 
-                    Stat stat = statMap.getOrDefault(keyword, new Stat(0.0, 1.0, 1L));
-                    double score = calcTrendScore(todayCount, yesterdayCount, stat.mean, stat.std);
-
-                    return KeywordRankingDto.builder()
-                            .keyword(keyword)
-                            .todayCount(todayCount)
-                            .yesterdayCount(yesterdayCount)
-                            .score(score)
-                            .build();
-                })
+        return out.stream()
                 .sorted(Comparator.comparingDouble(KeywordRankingDto::score).reversed())
                 .limit(limit)
-                .collect(Collectors.toList());
+                .toList();
     }
 
     private Map<String, Integer> fetchKeywordCounts(String source, LocalDate date, int limit) {
