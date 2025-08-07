@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 
 @Slf4j
@@ -22,6 +23,7 @@ public class RedisPostConsumer {
     private final ObjectMapper objectMapper;
 
     private static final String KEYWORD_PREFIX = "keyword_count:";
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     @KafkaListener(topics = "raw-posts", groupId = "raw-posts-redis")
     public void consume(ConsumerRecord<String, String> record) {
@@ -30,7 +32,7 @@ public class RedisPostConsumer {
 
             String site = node.get("source").asText();
             String title = node.get("title").asText();
-            String date = LocalDate.now().toString();
+            String date = LocalDate.now(KST).toString();
 
             // keywords 필드 우선 사용
             List<String> keywords;
