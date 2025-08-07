@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 public class KeywordRankingService {
 
     private static final double ALPHA = 1.0;
-    private static final List<String> SOURCES = List.of("github", "hn", "reddit");
+    private static final List<String> SOURCES = List.of("github", "hackernews", "reddit");
 
     private final RedisTemplate<String, String> redisTemplate;
     private final ElasticsearchClient esClient;
