@@ -20,12 +20,6 @@ spring:
         order_inserts: true
     show-sql: true
 
-  batch:
-    jdbc:
-      initialize-schema: never
-    job:
-      enabled: false
-
   redis:
     host: ${REDIS_HOST}
     port: ${REDIS_PORT}
