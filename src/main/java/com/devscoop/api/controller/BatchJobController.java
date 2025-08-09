@@ -1,6 +1,6 @@
 package com.devscoop.api.controller;
 
-import com.devscoop.api.service.BackfillJobService;
+import com.devscoop.api.service.BackfillService;
 import com.devscoop.api.service.KeywordExtractService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class BatchJobController {
 
     private final KeywordExtractService keywordExtractService;
-    private final BackfillJobService backfillJobService;
+    private final BackfillService backfillJobService;
 
     @PostMapping("/keywords")
     public String extractHistory() {
