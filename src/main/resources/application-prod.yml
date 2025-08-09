@@ -1,10 +1,4 @@
 spring:
-
-  batch:
-    job:
-      enabled: false
-    jdbc:
-      initialize-schema: always
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
     producer:
