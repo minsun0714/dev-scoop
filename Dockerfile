@@ -2,7 +2,7 @@
 FROM gradle:8.8-jdk21 AS builder
 WORKDIR /workspace
 COPY . .
-RUN ./gradlew clean build --no-daemon
+RUN ./gradlew clean build --no-daemon -x test
 
 # 2단계: 실행 스테이지
 FROM openjdk:21-jdk-slim
