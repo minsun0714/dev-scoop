@@ -7,6 +7,7 @@ public record KeywordRankingDto(
         String keyword,
         Integer todayCount,
         Integer yesterdayCount,
-        double score
+        double score,
+        String badge
 ) {
 }
