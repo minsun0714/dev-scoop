@@ -40,9 +40,7 @@ public class RedditOAuthController {
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /**
-     * 1) Reddit 동의 페이지로 리다이렉트
-     */
+    /** 1) Reddit 동의 페이지로 리다이렉트 */
     @GetMapping("/authorize")
     public ResponseEntity<Void> authorize(HttpServletRequest request) {
         String state = UUID.randomUUID().toString();
@@ -63,9 +61,7 @@ public class RedditOAuthController {
         return new ResponseEntity<>(headers, HttpStatus.FOUND);
     }
 
-    /**
-     * 2) Callback - 인가 코드 → 토큰 발급
-     */
+    /** 2) Callback - 인가 코드 → 토큰 발급 */
     @GetMapping("/callback")
     public ResponseEntity<Void> callback(@RequestParam String code,
                                          @RequestParam String state,
@@ -98,14 +94,14 @@ public class RedditOAuthController {
 
             log.info("Reddit token raw response: {}", tokenResp.getBody());
 
-            if (!tokenResp.getStatusCode().is2xxSuccessful()) {
+            if (!tokenResp.getStatusCode().is2xxSuccessful() || tokenResp.getBody() == null) {
                 return redirect(successRedirect + "&error=token_failed");
             }
 
             RedditToken token = objectMapper.readValue(tokenResp.getBody(), RedditToken.class);
 
             // Refresh Token Redis 저장 (유효기간 없이)
-            if (token.refreshToken() != null) {
+            if (token.refreshToken() != null && !token.refreshToken().isBlank()) {
                 redisTemplate.opsForValue().set("reddit_refresh_token", token.refreshToken());
                 log.info("Stored Reddit refresh token in Redis");
             } else {
@@ -126,6 +122,7 @@ public class RedditOAuthController {
         return new ResponseEntity<>(redirect, HttpStatus.FOUND);
     }
 
+    // Reddit 토큰 응답 DTO
     public record RedditToken(
             @JsonProperty("access_token") String accessToken,
             @JsonProperty("token_type") String tokenType,
