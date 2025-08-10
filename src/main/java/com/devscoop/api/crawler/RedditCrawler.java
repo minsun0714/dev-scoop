@@ -152,19 +152,23 @@ public class RedditCrawler {
     }
 
     private String getAccessToken() throws Exception {
+        // refresh_token은 최초 Authorization Code Flow 진행 후 저장
+        String refreshToken = "여기에_발급받은_refresh_token";
+
         String auth = CLIENT_ID + ":" + CLIENT_SECRET;
         String basicAuth = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
+
+        String body = "grant_type=refresh_token&refresh_token=" + URLEncoder.encode(refreshToken, StandardCharsets.UTF_8);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("https://www.reddit.com/api/v1/access_token"))
                 .header("Authorization", "Basic " + basicAuth)
-                .header("User-Agent", USER_AGENT)
-                .POST(HttpRequest.BodyPublishers.ofString("grant_type=client_credentials"))
+                .header("User-Agent", "DevScoopOAuthClient/1.0 by u/" + redditUsername)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 
         HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-
-        log.info("Reddit token response: {}", response.body()); // 디버깅용 로그
+        log.info("Reddit token response: {}", response.body());
 
         JsonNode root = mapper.readTree(response.body());
         JsonNode tokenNode = root.get("access_token");
