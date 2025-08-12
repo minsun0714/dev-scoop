@@ -36,9 +36,9 @@ public class ArticleSearchService {
                             .query(keyword)
                     ));
 
-            if (source != null && !source.isBlank()) {
+            if (source != null && !source.isBlank() && !"all".equals(source)) {
                 boolQuery.filter(f -> f.term(TermQuery.of(t -> t
-                        .field("source")
+                        .field("source.keyword")
                         .value(source)
                 )));
             }
